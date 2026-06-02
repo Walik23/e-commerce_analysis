@@ -201,10 +201,18 @@ def main():
     if len(time_anomalies) > 0:
         visualizer.plot_anomaly_timeline(time_anomalies)
 
+    if len(funnel_result) >= 3:
+        total_conversion = (
+            funnel_result.iloc[-1]['users'] / 
+            funnel_result.iloc[0]['users'] * 100
+        )
+    else:
+        total_conversion = 0
+
     summary_metrics = {
         'total_users': df['user_id'].nunique(),
         'total_events': len(df),
-        'conversion_rate': funnel_result.iloc[-1]['conversion_rate'] if len(funnel_result) > 0 else 0,
+        'conversion_rate': total_conversion,
         'avg_session_length': df.groupby('session_id').size().mean(),
         'retention_30d': retention_matrix[1].mean() if 1 in retention_matrix.columns else 0,
         'anomalies_detected': len(suspicious_users) + len(anomalies_iso),
