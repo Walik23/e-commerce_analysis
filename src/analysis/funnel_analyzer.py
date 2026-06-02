@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,11 +14,12 @@ class FunnelAnalyzer:
         logger.info(f"Funnel analysis: {' -> '.join(steps)}")
         
         funnel_stats = []
+        prev_users = None
         
         for i, step in enumerate(steps):
             if i == 0:
-                users_at_step = set(self.df[self.df['event_type'] == step]['user_id'])
-                total_users = len(users_at_step)
+                prev_users = set(self.df[self.df['event_type'] == step]['user_id'])
+                total_users = len(prev_users)
                 
                 funnel_stats.append({
                     'step': step,
@@ -28,11 +28,7 @@ class FunnelAnalyzer:
                     'conversion_rate': 100.0,
                     'drop_off_rate': 0.0
                 })
-            else:
-                prev_step = steps[i-1]
-
-                prev_users = set(self.df[self.df['event_type'] == prev_step]['user_id'])
-                
+            else:   
                 current_users = set(
                     self.df[
                         (self.df['event_type'] == step) & 
@@ -55,6 +51,8 @@ class FunnelAnalyzer:
                 })
                 
                 logger.info(f"  {step}: {users_count} users ({conversion:.2f}% conversion)")
+
+                prev_users = current_users
         
         return pd.DataFrame(funnel_stats)
     

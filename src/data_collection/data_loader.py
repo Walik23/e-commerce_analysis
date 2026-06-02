@@ -3,6 +3,7 @@ import logging
 from typing import Optional, Dict
 from pathlib import Path
 import glob
+import kagglehub
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,13 +15,32 @@ class DataLoader:
         'user_session': 'session_id',
     }
 
-    def __init__(self, data_path: str, column_mapping: Optional[Dict] = None):
-        self.data_path = Path(data_path)
+    def __init__(self, data_path: Optional[str] = None,
+                 column_mapping: Optional[Dict] = None,
+                 kaggle_dataset: Optional[str] = None):
+        
+        if kaggle_dataset:
+            data_path = self._download_from_kaggle(kaggle_dataset)
+            
+        self.data_path = Path(data_path) if data_path else None
+        
         self.column_mapping = self.COLUMN_MAPPING.copy()
         if column_mapping:
             self.column_mapping.update(column_mapping)
 
-        logger.info(f"DataLoader initialized for {data_path}")
+        logger.info(f"DataLoader initialized for {self.data_path}")
+
+    def _download_from_kaggle(self, dataset: str) -> Optional[Path]:
+        logger.info(f"Downloading dataset from Kaggle (this may take a while): {dataset}")
+        
+        try:
+            path = kagglehub.dataset_download(dataset)
+            logger.info(f"Dataset downloaded to: {path}")
+            return str(path)
+            
+        except Exception as e:
+            logger.error(f"Failed to download from Kaggle: {e}")
+            raise
     
     def load_csv(self, encoding: str = 'utf-8') -> Optional[pd.DataFrame]:
         try:
@@ -31,6 +51,8 @@ class DataLoader:
             elif self.data_path.is_dir():
                 csv_files = glob.glob(str(self.data_path / "*.csv"))
                 
+                if not csv_files:
+                    csv_files = glob.glob(str(self.data_path / "**/*.csv"), recursive=True)
                 if not csv_files:
                     logger.error(f"No CSV files found in {self.data_path}")
                     return None

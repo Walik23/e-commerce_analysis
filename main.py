@@ -1,7 +1,5 @@
-import pandas as pd
 import logging
 from pathlib import Path
-import yaml
 from datetime import datetime
 
 from src.data_collection.data_loader import DataLoader
@@ -16,24 +14,13 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('monitoring_system.log'),
+        logging.FileHandler('monitoring_system.log', encoding='utf-8'),
         logging.StreamHandler()
-    ]
+    ],
+    force=True
 )
 
 logger = logging.getLogger(__name__)
-
-
-def load_config(config_path: str = 'config/config.yaml') -> dict:
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        logger.info(f"Configuration loaded from {config_path}")
-        return config
-    except Exception as e:
-        logger.error(f"Error loading configuration: {e}")
-        return {}
-
 
 def main():
     logger.info("=" * 80)
@@ -43,7 +30,7 @@ def main():
     start_time = datetime.now()
 
     logger.info("\n[STEP 1] Loading data...")
-    data_loader = DataLoader('data/raw')
+    data_loader = DataLoader(kaggle_dataset="mkechinov/ecommerce-events-history-in-cosmetics-shop")
     df = data_loader.load_csv()
     
     if df is None:
@@ -74,7 +61,7 @@ def main():
     logger.info("\n[STEP 3] Conversion funnel analysis…")
     funnel_analyzer = FunnelAnalyzer(df)
 
-    funnel_steps = ['view', 'cart', 'remove_from_cart', 'purchase']
+    funnel_steps = ['view', 'cart', 'purchase']
     
     funnel_result = funnel_analyzer.define_funnel(funnel_steps)
     print("\n--- Funnel analysis results ---")
@@ -107,7 +94,7 @@ def main():
     segmentation = UserSegmentation(df)
     
     rfm = segmentation.calculate_rfm()
-    rfm_scored = segmentation.assign_rfm_scores(rfm) #here everything is dying
+    rfm_scored = segmentation.assign_rfm_scores(rfm)
     rfm_segmented = segmentation.create_rfm_segments(rfm_scored)
     
     print("\n--- Distribution of users by RFM segments ---")

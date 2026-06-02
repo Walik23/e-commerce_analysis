@@ -1,6 +1,4 @@
 import pandas as pd
-import numpy as np
-from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,18 +39,28 @@ class DataPreprocessor:
         return df
     
     def create_session_id(self, df: pd.DataFrame, 
-                         time_threshold: int = 30) -> pd.DataFrame:
+                         time_threshold: int = 30,
+                         time_unit: str = 'minutes') -> pd.DataFrame:
         logger.info(f"Creating a session with a threshold {time_threshold} minutes")
         
-        df = df.sort_values(['user_id', 'timestamp'])
+        df = df.sort_values(['user_id', 'timestamp']).copy()
+
+        if time_unit == 'minutes':
+            threshold_td = pd.Timedelta(minutes=time_threshold)
+        elif time_unit == 'seconds':
+            threshold_td = pd.Timedelta(seconds=time_threshold)
+        elif time_unit == 'hours':
+            threshold_td = pd.Timedelta(hours=time_threshold)
+        else:
+            raise ValueError(f"Unsupported time_unit: {time_unit}")
 
         df['time_diff'] = df.groupby('user_id')['timestamp'].diff()
 
-        df['new_session'] = (df['time_diff'] > pd.Timedelta(minutes=time_threshold)) | df['time_diff'].isna()
+        df['new_session'] = (df['time_diff'] > threshold_td) | df['time_diff'].isna()
 
-        df['session_id'] = df.groupby('user_id')['new_session'].cumsum()
-        df['session_id'] = df['user_id'].astype(str) + '_' + df['session_id'].astype(str)
+        df['session_num'] = df.groupby('user_id')['new_session'].cumsum()
+        df['session_id'] = df['user_id'].astype(str) + '_' + df['session_num'].astype(str)
 
-        df = df.drop(['time_diff', 'new_session'], axis=1)
+        df = df.drop(['time_diff', 'new_session', 'session_num'], axis=1)
         
         return df

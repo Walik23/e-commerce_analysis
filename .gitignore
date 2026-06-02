@@ -2,5 +2,6 @@ data/processed/
 data/results/
 data/raw_old/
 __pycache__/
+.pytest_cache/
 venv/
-.log
+*.log
