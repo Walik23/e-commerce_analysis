@@ -34,7 +34,7 @@ class DataLoader:
         logger.info(f"Downloading dataset from Kaggle (this may take a while): {dataset}")
         
         try:
-            path = kagglehub.dataset_download(dataset)
+            path = kagglehub.dataset_download(dataset, output_dir="./data/raw/kaggle")
             logger.info(f"Dataset downloaded to: {path}")
             return str(path)
             
