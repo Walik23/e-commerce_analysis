@@ -1,4 +1,5 @@
 import logging
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -9,6 +10,8 @@ from src.analysis.cohort_analyzer import CohortAnalyzer
 from src.analysis.segmentation import UserSegmentation
 from src.analysis.anomaly_detector import AnomalyDetector
 from src.visualization.visualizer import AnalyticsVisualizer
+from src.validation.validation import validate_rfm_sample_representativeness
+from src.validation.validation import validate_anomaly_detection_sample
 
 logging.basicConfig(
     level=logging.INFO,
@@ -113,6 +116,28 @@ def main():
 
         rfm_sample = rfm.sample(n=max_users_for_clustering, random_state=42)
 
+        logger.info("\nValidating K-means sample representativeness...")
+
+        kmeans_validation = validate_rfm_sample_representativeness(rfm, rfm_sample)
+
+        logger.info(f"Sample size: {kmeans_validation['sample_size']:,} / {kmeans_validation['full_size']:,} "
+                    f"({kmeans_validation['sample_rate_%']:.1f}%)")
+
+        print("\n--- K-means Sample Validation (KS-test) ---")
+        all_kmeans_representative = True
+        for metric, result in kmeans_validation['ks_tests'].items():
+            print(f"{metric}: {result['interpretation']}")
+            if not result['is_representative']:
+                all_kmeans_representative = False
+
+        print("\n--- Descriptive Statistics Comparison ---")
+        for metric, stats in kmeans_validation['descriptive_stats'].items():
+            print(f"{metric}: mean diff = {stats['mean_diff_%']}%, median diff = {stats['median_diff_%']}%")
+
+        if not all_kmeans_representative:
+            logger.warning(" Some KS-tests failed, but proceeding with analysis")
+            logger.warning(" (Sample size may still be sufficient for k-means)")
+
         optimal_clusters_df = segmentation.find_optimal_clusters(rfm_sample, max_clusters=8)
     else:
         rfm_sample = rfm
@@ -142,10 +167,37 @@ def main():
     clustered_df.to_csv('data/results/user_clusters.csv', index=False)
     logger.info(f"Clusters are assigned to {len(clustered_df):,} users")
 
-    logger.info("\n[STEP 7] Anomaly detection...")
+    logger.info("\n[STEP 7.1] Validating anomaly detection sample...")
+
+    df_user_features = df.groupby('user_id').agg({
+        'event_type': 'count',
+        'session_id': 'nunique',
+        'timestamp': 'count'
+    }).reset_index()
+    df_user_features.columns = ['user_id', 'total_events', 'total_sessions', 'dummy']
+    df_user_features['events_per_session'] = (
+        df_user_features['total_events'] / df_user_features['total_sessions']
+    )
+    df_user_features = df_user_features.drop('dummy', axis=1)
+
+    df_sample_features = df_user_features.sample(
+        n=min(1000000, len(df_user_features)), 
+        random_state=42
+    )
+
+    anomaly_validation = validate_anomaly_detection_sample(df_user_features, df_sample_features)
+
+    print("\n--- Anomaly Detection Sample Validation (KS-test) ---")
+    for feature, result in anomaly_validation['anomaly_features'].items():
+        print(f"{feature}: {result['interpretation']}")
+
+    logger.info("\n[STEP 7.2] Anomaly detection...")
     anomaly_detector = AnomalyDetector(df)
 
-    suspicious_users = anomaly_detector.detect_fraud_patterns(sample_size=1000000)
+    suspicious_users = anomaly_detector.detect_fraud_patterns(
+        sample_size=1000000,
+        user_features=df_user_features
+    )
     if len(suspicious_users) > 0:
         print(f"\n{len(suspicious_users)} suspicious users detected")
         print("\n--- Top 5 suspicious users ---")
@@ -209,18 +261,22 @@ def main():
     else:
         total_conversion = 0
 
+    suspicious_user_ids = set(suspicious_users['user_id'].unique())
+    anomaly_user_ids = set(anomalies_iso['user_id'].unique())
+    all_anomaly_users = suspicious_user_ids.union(anomaly_user_ids)
+
     summary_metrics = {
         'total_users': df['user_id'].nunique(),
         'total_events': len(df),
         'conversion_rate': total_conversion,
         'avg_session_length': df.groupby('session_id').size().mean(),
         'retention_30d': retention_matrix[1].mean() if 1 in retention_matrix.columns else 0,
-        'anomalies_detected': len(suspicious_users) + len(anomalies_iso),
+        'anomalies_detected': len(all_anomaly_users),
         'key_insights': [
             f"The main drop-off point: {critical_points[0]['step']} ({critical_points[0]['drop_off_rate']:.1f}%)" if critical_points else "No critical points were found",
             f"The largest segment: {segment_distribution.index[0]} ({segment_distribution.values[0]} of users)",
             f"Average retention after a month: {retention_matrix[1].mean():.1f}%" if 1 in retention_matrix.columns else "Retention data not available",
-            f"Detected {len(suspicious_users) + len(anomalies_iso)} potential anomalies"
+            f"Detected {len(all_anomaly_users)} users with potential anomalies"
         ]
     }
     

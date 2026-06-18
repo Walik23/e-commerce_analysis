@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,31 +37,50 @@ class AnomalyDetector:
         
         return anomalies
     
-    def detect_fraud_patterns(self, sample_size: int = 50000) -> pd.DataFrame:
+    def detect_fraud_patterns(self, sample_size: int = 50000, user_features: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         logger.info("Detection of suspicious behavior patterns")
         
         unique_users = self.df['user_id'].unique()
         total_users = len(unique_users)
         
-        if total_users > sample_size:
-            logger.info(f"Sampling {sample_size:,} users from {total_users:,}")
-            sampled_users = np.random.choice(unique_users, sample_size, replace=False)
-            df_work = self.df[self.df['user_id'].isin(sampled_users)].copy()
+        if user_features is not None:
+            logger.info(f"Using pre-computed user features for {len(user_features):,} users")
+            max_events_per_hour_data = user_features.copy()
+
+            if len(user_features) > sample_size:
+                logger.info(f"Sampling {sample_size:,} users from {len(user_features):,}")
+                sampled_users = np.random.choice(
+                    user_features['user_id'].unique(), 
+                    sample_size, 
+                    replace=False
+                )
+                max_events_per_hour_data = user_features[user_features['user_id'].isin(sampled_users)].copy()
+                df_work = self.df[self.df['user_id'].isin(sampled_users)].copy()
+            else:
+                df_work = self.df.copy()
+        
         else:
-            df_work = self.df.copy()
-            logger.info(f"Analyzing all {total_users:,} users")
+            if total_users > sample_size:
+                logger.info(f"Sampling {sample_size:,} users from {total_users:,}")
+                sampled_users = np.random.choice(unique_users, sample_size, replace=False)
+                df_work = self.df[self.df['user_id'].isin(sampled_users)].copy()
+            else:
+                df_work = self.df.copy()
+                logger.info(f"Analyzing all {total_users:,} users")
+
+            max_events_per_hour_data = df_work.groupby('user_id').size().reset_index(name='total_events')
+            max_events_per_hour_data.columns = ['user_id', 'total_events']
         
         logger.info("Computing fraud indicators...")
 
-        df_work['hour_floor'] = df_work['timestamp'].dt.floor('h')
-        events_per_hour = df_work.groupby(['user_id', 'hour_floor']).size()
-        max_events_per_hour = events_per_hour.groupby('user_id').max()
+        total_events = max_events_per_hour_data.set_index('user_id')['total_events'] \
+            if 'total_events' in max_events_per_hour_data.columns \
+            else df_work.groupby('user_id').size()
 
         event_diversity = df_work.groupby('user_id')['event_type'].nunique()
-        total_events = df_work.groupby('user_id').size()
 
         if 'hour' in df_work.columns:
-            night_mask = df_work['hour'].isin([0, 1, 2, 3, 4])
+            night_mask = df_work['hour'].isin([0, 1, 2, 3, 4, 5])
             night_events = df_work[night_mask].groupby('user_id').size()
             night_ratio = (night_events / total_events).fillna(0)
         else:
@@ -85,7 +104,7 @@ class AnomalyDetector:
         for user_id in total_events.index:
             flags = []
 
-            if user_id in max_events_per_hour.index and max_events_per_hour[user_id] > 100:
+            if total_events[user_id] > 100:
                 flags.append('high_frequency')
 
             if event_diversity.get(user_id, 0) == 1 and total_events[user_id] > 20:
@@ -101,7 +120,7 @@ class AnomalyDetector:
                 suspicious_list.append({
                     'user_id': user_id,
                     'flags': ', '.join(flags),
-                    'total_events': total_events[user_id],
+                    'total_events': int(total_events[user_id]),
                     'risk_score': len(flags)
                 })
         
@@ -113,9 +132,6 @@ class AnomalyDetector:
         else:
             logger.info("No suspicious users detected")
 
-        if 'hour_floor' in df_work.columns:
-            df_work.drop('hour_floor', axis=1, inplace=True)
-        
         return result
     
     def isolation_forest_anomalies(self, 
